@@ -12,8 +12,21 @@ logging.basicConfig(level=logging.INFO)
 bot_db = BotDB('users.db')
 
 async def add_orders(message: types.Message):
-    orders = message.text
 
+    phone = message.text
+
+
+    cursor.execute("SELECT * FROM activity_orders WHERE phone=?", (phone,))
+    client = cursor.fetchone()
+
+
+    if client:
+        orders = client[2] + ', ' + message.text
+        cursor.execute("UPDATE activity_orders SET orders=? WHERE phone=?", (orders, phone))
+        conn.commit()
+        await message.answer(f"Заказ успешно добавлен для клиента с номером телефона {phone}")
+    else:
+        await message.answer("Клиент с таким номером телефона не найден")
 class MSG_Add(StatesGroup):
     name = State()
     phone = State()
