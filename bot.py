@@ -5,6 +5,7 @@ from aiogram import Dispatcher, Bot, executor, types
 import logging
 from keys import BOT_TOKEN
 from db import BotDB
+import maya
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -25,6 +26,12 @@ class EnterState(StatesGroup):
     password = State()
 
 
+class MSG_Order(StatesGroup):
+    phone = State()
+    order = State()
+    deadline = State()
+
+
 @dp.message_handler(commands=['start'])
 async def start_menu(message: types.Message):
     await message.answer('Введите пароль:')
@@ -40,7 +47,8 @@ async def password(message: types.Message, state: FSMContext):
         await message.answer('Это меню. Вот список функций данного бота: \n'
                              '/addclient - добавление нового клиента \n'
                              '/addorder - добавляние нового заказа к клиенту \n'
-                             '/clientinfo - поиск информации клиента и его заказов')
+                             '/clientinfo - поиск информации клиента и его заказов\n'
+                             '/findcloseorder - поиск ближайших заказов')
         await state.finish()
     else:
         await message.answer("Пароль неверный, попробуйте еще раз")
@@ -50,6 +58,42 @@ async def password(message: types.Message, state: FSMContext):
 async def add_client(message: types.Message):
     await message.answer('Как зовут клиента: ')
     await MSG_Add.name.set()
+
+
+@dp.message_handler(commands=['addorder'])
+async def add_client(message: types.Message):
+    await message.answer('Введите номер телефона клиента: ')
+    await MSG_Order.phone.set()
+
+
+@dp.message_handler(state=MSG_Order.phone)
+async def add_name_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(phone=message.text)
+    if bot_db.user_exists(message.text):
+        await message.answer("Отлично! Теперь введите заказ клиента:")
+        await MSG_Order.next()
+    else:
+        await message.answer('Такого пользователя не существует')
+
+
+@dp.message_handler(state=MSG_Order.order)
+async def add_name_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(order=message.text)
+    await message.answer("Теперь введите дедлайн заказа(если хотите оставить по умолчанию введите 0)\n"
+                         "Формат ввода дедлайна: год-месяц-день часы:минуты")
+    await MSG_Order.next()
+
+
+@dp.message_handler(state=MSG_Order.deadline)
+async def add_name_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(deadline=message.text)
+    data = await state.get_data()
+    if data['deadline'] == '0':
+        bot_db.add_order(data['phone'], data['order'])
+    else:
+        bot_db.add_order(data['phone'], data['order'], data['deadline'])
+    await message.answer('Данные введены')
+    await state.finish()
 
 
 @dp.message_handler(state=MSG_Add.name)

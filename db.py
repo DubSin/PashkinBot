@@ -17,3 +17,12 @@ class BotDB:
     def find_user(self, phone):
         result = self.cursor.execute("SELECT * FROM `users` WHERE `phone` = ?", (phone, ))
         return result.fetchone()
+
+    def add_order(self, phone, order, deadline=False):
+        if deadline:
+            self.cursor.execute("INSERT INTO 'activity_orders' ('phone', 'orders', 'deadline') VALUES (?, ?, ?)",
+                                (phone, order, deadline))
+        else:
+            self.cursor.execute("INSERT INTO 'activity_orders' ('phone', 'orders') VALUES (?, ?)", (phone, order))
+        return self.db.commit()
+
