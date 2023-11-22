@@ -5,6 +5,7 @@ from aiogram import Dispatcher, Bot, executor, types
 import logging
 from keys import BOT_TOKEN
 from db import BotDB
+import datetime
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -69,6 +70,7 @@ async def add_client(message: types.Message):
 @dp.message_handler(commands=['addorder'])
 async def process_add_orders_command(message: types.Message):
     await add_orders(message)
+    await message.answer("Заказ добавлен")
 
 @dp.message_handler(state=MSG_Add.name)
 async def add_name_to_client(message: types.Message, state: FSMContext):
@@ -108,7 +110,10 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
     else:
         await message.answer('Клиент не найден')
     await state.finish()
+
+
 if '__main__' == __name__:
     executor.start_polling(dp, skip_updates=True)
+
 
 
