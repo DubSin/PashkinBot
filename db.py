@@ -1,6 +1,7 @@
 import sqlite3
 
-
+conn = sqlite3.connect('orders.db')
+cursor = conn.cursor()
 class BotDB:
     def __init__(self, db):
         self.db = sqlite3.connect(db)
@@ -14,21 +15,32 @@ class BotDB:
         result = self.cursor.execute("SELECT `id` FROM `users` WHERE `phone` = ?", (phone,))
         return bool(len(result.fetchall()))
 
+    async def send_notification(self, user_id,  message):
+        await bot.send_message(user_id, message)
+
+    async def track_orders(self):
+        while True:
+            current_date = datetime.date.today()
+            three_days_ago = current_date - datetime.timedelta(days=3)
+            cursor.execute("SELECT user_phone, order_id FROM active_orders WHERE order_date = ?", (three_days_ago,))
+            orders = cursor.fetchall()
+            for order in orders:
+                user_id, order_id = order
+                message = f"Пожалуйста, отдайте заказ {order_id}"
+                await send_notification(user_id, message)
+            await asyncio.sleep(86400)
     def find_user(self, phone):
         result = self.cursor.execute("SELECT * FROM `users` WHERE `phone` = ?", (phone, ))
         return result.fetchone()
 
-        # функция для добавления заказа в таблицу active_orders
-    def add_order(self, phone):
-        current_date = datetime.datetime.now().date()
-        cursor.execute("INSERT INTO active_orders (user_id, order_date) VALUES (?, ?)", (phone, current_date))
-        conn.commit()
+    async def on_startup(_):
+        asyncio.create_task(track_orders())
 
-    async def send_notification(self):
-        three_days_ago = datetime.datetime.now().date() - datetime.timedelta(days=3)
-        cursor.execute("SELECT user_id FROM active_orders WHERE order_date < ?", (three_days_ago,))
-        users = cursor.fetchall()
-        for user in users:
-            await bot.send_message(user[0], "Необходимо отдать заказ!")
+    #def add_order(self, phone):
+        #current_date = datetime.datetime.now().date()
+        #cursor.execute("INSERT INTO active_orders (user_id, order_date) VALUES (?, ?)", (phone, current_date))
+        #conn.commit()
+
 
         return self.db.commit()
+
