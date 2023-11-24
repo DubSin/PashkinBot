@@ -67,10 +67,26 @@ async def add_client(message: types.Message):
     await message.answer('Как зовут клиента: ')
     await MSG_Add.name.set()
 
-@dp.message_handler(commands=['addorder'])
-async def process_add_orders_command(message: types.Message):
-    await add_orders(message)
-    await message.answer("Заказ добавлен")
+#@dp.message_handler(commands=['addorder'])
+#async def process_add_orders_command(message: types.Message):
+    #await add_orders(message)
+    #await message.answer("Заказ добавлен")
+@dp.message_handler(commands=['process_order'])
+async def process_order(message: types.Message):
+    user_id = message.chat.id
+    command = message.get_args()
+
+    if command == 'tomorrow':
+        # отложить выполнение действий до завтра
+        tomorrow = datetime.date.today() + datetime.timedelta(days=1)
+        cursor.execute("UPDATE active_orders SET process_date = ? WHERE user_id = ?", (tomorrow, user_id))
+        conn.commit()
+        await message.answer("Уведомление будет отправлено завтра")
+    elif command == 'close_order':
+        # переписать содержимое ячейки orders из таблицы activity_orders в таблицу closed_orders и удалить его из activity_orders
+        # ваш код для выполнения SQL запросов к базе данных
+        await message.answer("Заказ успешно закрыт")
+
 
 @dp.message_handler(state=MSG_Add.name)
 async def add_name_to_client(message: types.Message, state: FSMContext):
@@ -114,6 +130,5 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
 
 if '__main__' == __name__:
     executor.start_polling(dp, skip_updates=True)
-
 
 
