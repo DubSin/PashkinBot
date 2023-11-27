@@ -2,10 +2,10 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import StatesGroup, State
 from aiogram.dispatcher import FSMContext
 from aiogram import Dispatcher, Bot, executor, types
+import asyncio
 import logging
 from keys import BOT_TOKEN
 from db import BotDB
-import maya
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -44,14 +44,33 @@ async def password(message: types.Message, state: FSMContext):
     dat = await state.get_data()
     if dat['password'] == "Пашка Лох":
         await message.answer(f'Саламчикс {message.from_user.username}')
+        bot_db.add_editor(message.from_user.id)
         await message.answer('Это меню. Вот список функций данного бота: \n'
                              '/addclient - добавление нового клиента \n'
                              '/addorder - добавляние нового заказа к клиенту \n'
                              '/clientinfo - поиск информации клиента и его заказов\n'
-                             '/findcloseorder - поиск ближайших заказов')
+                             '/findcloseorder - поиск ближайших заказов\n'
+                             '/unsubscribe - отказаться от рассылки бота')
         await state.finish()
     else:
         await message.answer("Пароль неверный, попробуйте еще раз")
+
+
+@dp.message_handler(commands=['findcloseorder'])
+async def add_client(message: types.Message):
+    close_orders = bot_db.get_close_orders()
+    for orders in close_orders:
+        await message.answer(f'phone: {orders[1]}\n'
+                             f'description: {orders[2]}\n'
+                             f'deadline: {orders[3]}')
+
+
+async def notifications(time):
+    while True:
+        editors = bot_db.get_editors()
+        for editor in editors:
+            await bot.send_message(editor[0], '&&&&')
+        await asyncio.sleep(time)
 
 
 @dp.message_handler(commands=['addclient'])
@@ -80,7 +99,9 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
 async def add_name_to_client(message: types.Message, state: FSMContext):
     await state.update_data(order=message.text)
     await message.answer("Теперь введите дедлайн заказа(если хотите оставить по умолчанию введите 0)\n"
-                         "Формат ввода дедлайна: год-месяц-день часы:минуты")
+                         "Формат ввода дедлайна: год-месяц-день час")
+    await message.answer("Год: вводить целую дату (2020, 2021, 2022)\n"
+                         "Месяц, день и час: вводить 2 цифрами (01, 02, 03, ... , 11, 12)")
     await MSG_Order.next()
 
 
@@ -88,6 +109,7 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
 async def add_name_to_client(message: types.Message, state: FSMContext):
     await state.update_data(deadline=message.text)
     data = await state.get_data()
+    data['deadline'] = data['deadline'] + ':00:00'
     if data['deadline'] == '0':
         bot_db.add_order(data['phone'], data['order'])
     else:
@@ -132,7 +154,11 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
                              f"Номер телефона: {user[2]}\n"
                              f"Дата подключения: {user[3]}\n")
     else:
-        await message.answer('Клиент не найден')
+        await message.answer('Клиент не найден нахуй!!!!!!!')
     await state.finish()
+
+
 if '__main__' == __name__:
+    loop = asyncio.get_event_loop()
+    loop.create_task(notifications(1000000))
     executor.start_polling(dp, skip_updates=True)
