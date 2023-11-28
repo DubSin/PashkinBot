@@ -11,21 +11,37 @@ class BotDB:
         self.cursor.execute("INSERT INTO 'editors' ('editor_id') VALUES (?)", (editor_id, ))
         return self.db.commit()
 
-    def get_close_orders(self):
-        ans = self.cursor.execute("SELECT * FROM 'activity_orders'").fetchall()
+    def editor_exists(self, editor_id):
+        result = self.cursor.execute("SELECT `id` FROM `editors` WHERE `editor_id` = ?", (editor_id,))
+        return bool(len(result.fetchall()))
+
+    def get_close_orders(self, one_time=False):
+        orders = self.cursor.execute("SELECT * FROM 'activity_orders'").fetchall()
         now = datetime.today()
         result = []
-        for i in ans:
+        way = []
+        for i in orders:
             try:
                 if datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now < timedelta(days=2):
                     result.append(i)
+                    way.append([*i, datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now])
             except ValueError:
                 pass
+        if one_time:
+            result = min(way, key=lambda x: x[4])
         return result
 
     def get_editors(self):
         result = self.cursor.execute("SELECT `editor_id` from `editors`")
         return result.fetchall()
+
+    def from_activity_to_closed(self, phone):
+        pass
+
+    def update_deadline(self, phone, deadline):
+        self.cursor.execute("UPDATE `activity_orders` SET `deadline` = ? WHERE `phone` = ?",
+                            (datetime.strptime(deadline, '%Y-%m-%d %H:%M:%S') + timedelta(days=1, hours=3), phone))
+        return self.db.commit()
 
     def add_user(self, name, phone):
         self.cursor.execute("INSERT INTO 'users' ('name', 'phone') VALUES (?, ?)", (name, phone))
