@@ -20,27 +20,33 @@ class BotDB:
         now = datetime.today()
         result = []
         way = []
-        for i in orders:
-            try:
-                if datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now < timedelta(days=2):
-                    result.append(i)
-                    way.append([*i, datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now])
-            except ValueError:
-                pass
-        if one_time:
-            result = min(way, key=lambda x: x[4])
-        return result
+        if orders:
+            for i in orders:
+                try:
+                    deadline = i[3].replace(':', '/')
+                    if datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now < timedelta(days=2):
+                        result.append([*i[:-1], deadline])
+                        way.append([*i, datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now])
+                except ValueError:
+                    pass
+            if one_time:
+                result = min(way, key=lambda x: x[4])
+            return result
 
     def get_editors(self):
         result = self.cursor.execute("SELECT `editor_id` from `editors`")
         return result.fetchall()
 
-    def from_activity_to_closed(self, phone):
-        pass
+    def from_activity_to_closed(self, phone, orders, deadline):
+        self.cursor.execute("INSERT INTO `closed_orders` (`phone`, `orders`) VALUES (?, ?)", (phone, orders))
+        self.cursor.execute("DELETE FROM `activity_orders` WHERE `phone` = ? AND `orders` = ? AND `deadline` = ?",
+                            (phone, orders, deadline))
+        return self.db.commit()
 
     def update_deadline(self, phone, deadline):
+        deadline = deadline.replace(',', ':')
         self.cursor.execute("UPDATE `activity_orders` SET `deadline` = ? WHERE `phone` = ?",
-                            (datetime.strptime(deadline, '%Y-%m-%d %H:%M:%S') + timedelta(days=1, hours=3), phone))
+                            (datetime.strptime(deadline, '%Y-%m-%d %H:%M:%S') + timedelta(days=1), phone))
         return self.db.commit()
 
     def add_user(self, name, phone):
@@ -54,6 +60,10 @@ class BotDB:
     def find_user(self, phone):
         result = self.cursor.execute("SELECT * FROM `users` WHERE `phone` = ?", (phone, ))
         return result.fetchone()
+
+    def users_closed_orders(self, phone):
+        result = self.cursor.execute("SELECT * FROM `closed_orders` WHERE `phone` = ?", (phone, ))
+        return result.fetchall()
 
     def add_order(self, phone, order, deadline=False):
         if deadline:

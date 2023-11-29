@@ -14,24 +14,18 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
 bot_db = BotDB('users.db')
+order_data = CallbackData('base', 'action', 'phone', 'orders', 'deadline')
 
 
-def orders_markup(phone, orders, deadline):
-    order_data = CallbackData('state', 'phone', 'orders', 'deadline')
-    inline_btn_post = InlineKeyboardButton('Перенести', callback_data=order_data.new(
-        state='post',
-        phone=phone,
-        orders=orders,
-        deadline=deadline
-    ))
-    inline_btn_accept = InlineKeyboardButton('Принять', callback_data=order_data.new(
-        state='accept',
-        phone=phone,
-        orders=orders,
-        deadline=deadline
-    ))
-    inline_kb = InlineKeyboardMarkup().add(inline_btn_post).add(inline_btn_accept)
-    return inline_kb
+def get_keyboard(phone, orders, deadline):
+    deadline = deadline.replace(":", '/')
+    return InlineKeyboardMarkup().row(
+        InlineKeyboardButton('Принять', callback_data=order_data.new(action='accept', phone=phone,
+                                                                     orders=orders,
+                                                                     deadline=deadline)),
+        InlineKeyboardButton('Перенести', callback_data=order_data.new(action='post', phone=phone,
+                                                                       orders=orders,
+                                                                       deadline=deadline)))
 
 
 class MSG_Add(StatesGroup):
@@ -55,17 +49,18 @@ class MSG_Order(StatesGroup):
 
 def converting_to_date(info):
     try:
-        date, time = info.split()
+        date, *time = info.split()
         dt = [int(i) for i in date.split('-')]
-        tm = [int(i) for i in time.split(':')]
-        if len(tm) == 0:
+        if len(time) == 0:
             result = datetime(dt[0], dt[1], dt[2])
-        if len(tm) == 1:
-            result = datetime(dt[0], dt[1], dt[2], tm[0])
-        if len(tm) == 2:
-            result = datetime(dt[0], dt[1], dt[2], tm[0], tm[1])
-        if len(tm) == 3:
-            result = datetime(dt[0], dt[1], dt[2], tm[0], tm[1], tm[2])
+        else:
+            tm = [int(i) for i in time[0].split(':')]
+            if len(tm) == 1:
+                result = datetime(dt[0], dt[1], dt[2], tm[0])
+            if len(tm) == 2:
+                result = datetime(dt[0], dt[1], dt[2], tm[0], tm[1])
+            if len(tm) == 3:
+                result = datetime(dt[0], dt[1], dt[2], tm[0], tm[1], tm[2])
         return result
     except Exception as e:
         print(e)
@@ -98,11 +93,11 @@ async def password(message: types.Message, state: FSMContext):
 
 
 @dp.message_handler(commands=['findcloseorder'])
-async def add_client(message: types.Message):
+async def find_close_orders(message: types.Message):
     if bot_db.editor_exists(message.from_user.id):
         close_orders = bot_db.get_close_orders()
         for orders in close_orders:
-            inline_markup = orders_markup(orders[1], orders[2], orders[3])
+            inline_markup = get_keyboard(orders[1], orders[2], orders[3])
             await message.answer(f'phone: {orders[1]}\n'
                                  f'description: {orders[2]}\n'
                                  f'deadline: {orders[3]}', reply_markup=inline_markup)
@@ -115,15 +110,17 @@ async def notifications(time):
         editors = bot_db.get_editors()
         for editor in editors:
             orders = bot_db.get_close_orders(one_time=True)
-            inline_markup = orders_markup(orders[1], orders[2], orders[3])
-            await bot.send_message(editor[0], f'phone: {orders[1]}\n'
-                                              f'description: {orders[2]}\n'
-                                              f'deadline: {orders[3]}', reply_markup=inline_markup)
+            if orders:
+                inline_markup = get_keyboard(orders[1], orders[2], orders[3])
+                await bot.send_message(editor[0], f'phone: {orders[1]}\n'
+                                                  f'description: {orders[2]}\n'
+                                                  f'deadline: {orders[3]}', reply_markup=inline_markup)
         await asyncio.sleep(time)
 
 
-@dp.callback_query_handler(lambda c: c.data.state == 'accept')
+@dp.callback_query_handler(order_data.filter(action='accept'))
 async def process_callback_button1(callback_query: CallbackQuery, callback_data: dict):
+    logging.info(callback_data)
     await bot.answer_callback_query(callback_query.id)
     await bot.edit_message_reply_markup(
         chat_id=callback_query.from_user.id,
@@ -133,15 +130,17 @@ async def process_callback_button1(callback_query: CallbackQuery, callback_data:
         chat_id=callback_query.from_user.id,
         message_id=callback_query.message.message_id,
         text=callback_query.message.text + '\n Заказ принят'
-                                )
+    )
     phone = callback_data.get('phone')
-    deadline = callback_data.get('deadline')
+    orders = callback_data.get('orders')
+    deadline = callback_data.get('deadline').replace('/', ':')
 
-    bot_db.update_deadline(phone, deadline)
+    bot_db.from_activity_to_closed(phone, orders, deadline)
 
 
-@dp.callback_query_handler(lambda c: c.data.state == 'post')
+@dp.callback_query_handler(order_data.filter(action='post'))
 async def process_callback_button1(callback_query: CallbackQuery, callback_data: dict):
+    logging.info(callback_data)
     await bot.answer_callback_query(callback_query.id)
     await bot.edit_message_reply_markup(
         chat_id=callback_query.from_user.id,
@@ -152,6 +151,10 @@ async def process_callback_button1(callback_query: CallbackQuery, callback_data:
         message_id=callback_query.message.message_id,
         text=callback_query.message.text + '\n Заказ перенесен на 1 день'
     )
+    phone = callback_data.get('phone')
+    deadline = callback_data.get('deadline').replace('/', ':')
+
+    bot_db.update_deadline(phone, deadline)
 
 
 @dp.message_handler(commands=['addclient'])
@@ -164,7 +167,7 @@ async def add_client(message: types.Message):
 
 
 @dp.message_handler(commands=['addorder'])
-async def add_client(message: types.Message):
+async def add_client_phone(message: types.Message):
     if bot_db.editor_exists(message.from_user.id):
         await message.answer('Введите номер телефона клиента: ')
         await MSG_Order.phone.set()
@@ -173,7 +176,7 @@ async def add_client(message: types.Message):
 
 
 @dp.message_handler(state=MSG_Order.phone)
-async def add_name_to_client(message: types.Message, state: FSMContext):
+async def add_order_to_client(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
     if bot_db.user_exists(message.text):
         await message.answer("Отлично! Теперь введите заказ клиента:")
@@ -184,12 +187,10 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
 
 
 @dp.message_handler(state=MSG_Order.order)
-async def add_name_to_client(message: types.Message, state: FSMContext):
+async def add_deadline_to_client(message: types.Message, state: FSMContext):
     await state.update_data(order=message.text)
-    await message.answer("Теперь введите дедлайн заказа(если хотите оставить по умолчанию введите 0)\n"
-                         "Формат ввода дедлайна: год-месяц-день час")
-    await message.answer("Год: вводить целую дату (2020, 2021, 2022)\n"
-                         "Месяц, день и час: вводить 2 цифрами (01, 02, 03, ... , 11, 12)")
+    await message.answer("Теперь введите дедлайн заказа(если хотите оставить по умолчанию (неделя) введите 0)\n"
+                         "Формат ввода дедлайна: год-месяц-день (час:минута:секунда, это не обязательно)")
     await MSG_Order.next()
 
 
@@ -203,8 +204,11 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
     else:
         deadline = converting_to_date(data['deadline'])
         if deadline:
-            bot_db.add_order(data['phone'], data['order'], deadline.strftime("%Y-%m-%d %H:%M:%S"))
-            await message.answer('Данные введены')
+            if deadline < datetime.today():
+                await message.answer('Дедлайн меньше текущего времени')
+            else:
+                bot_db.add_order(data['phone'], data['order'], deadline.strftime("%Y-%m-%d %H:%M:%S"))
+                await message.answer('Данные введены')
         else:
             await message.answer('Данные введены некорректно')
 
@@ -224,6 +228,7 @@ async def add_age_to_client(message: types.Message, state: FSMContext):
     data = await state.get_data()
     if not bot_db.user_exists(data['phone']):
         bot_db.add_user(data['username'], data['phone'])
+        await message.answer('Данные введены')
         await message.answer(f"Имя: {data['username']}\n"
                              f"Номер телефона: {data['phone']}")
     else:
@@ -245,10 +250,15 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
     data = await state.get_data()
     user = bot_db.find_user(data['phone'])
+    closed_orders = bot_db.users_closed_orders(user[2])
     if user:
         await message.answer(f"Имя: {user[1]}\n"
                              f"Номер телефона: {user[2]}\n"
                              f"Дата подключения: {user[3]}\n")
+        for order in closed_orders:
+            await message.answer(f"Номер телефон: {order[1]}\n"
+                                 f"Заказ: {order[2]}\n"
+                                 f"Дата закрытия заказ{order[3]}")
     else:
         await message.answer('Клиент не найден нахуй!!!!!!!')
     await state.finish()
@@ -256,5 +266,5 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
 
 if '__main__' == __name__:
     loop = asyncio.get_event_loop()
-    loop.create_task(notifications(1000000))
+    loop.create_task(notifications(10800))
     executor.start_polling(dp, skip_updates=True)
