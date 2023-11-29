@@ -23,13 +23,12 @@ class BotDB:
         if orders:
             for i in orders:
                 try:
-                    deadline = i[3].replace(':', '/')
                     if datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now < timedelta(days=2):
-                        result.append([*i[:-1], deadline])
+                        result.append([*i])
                         way.append([*i, datetime.strptime(i[3], '%Y-%m-%d %H:%M:%S') - now])
                 except ValueError:
                     pass
-            if one_time:
+            if one_time and way:
                 result = min(way, key=lambda x: x[4])
             return result
 
@@ -38,6 +37,7 @@ class BotDB:
         return result.fetchall()
 
     def from_activity_to_closed(self, phone, orders, deadline):
+        print(deadline)
         self.cursor.execute("INSERT INTO `closed_orders` (`phone`, `orders`) VALUES (?, ?)", (phone, orders))
         self.cursor.execute("DELETE FROM `activity_orders` WHERE `phone` = ? AND `orders` = ? AND `deadline` = ?",
                             (phone, orders, deadline))

@@ -18,7 +18,10 @@ order_data = CallbackData('base', 'action', 'phone', 'orders', 'deadline')
 
 
 def get_keyboard(phone, orders, deadline):
-    deadline = deadline.replace(":", '/')
+    deadline = deadline.replace(':', '\;/')
+    phone = phone.replace(':', '\;/')
+    orders = orders.replace(':', '\;/')
+
     return InlineKeyboardMarkup().row(
         InlineKeyboardButton('Принять', callback_data=order_data.new(action='accept', phone=phone,
                                                                      orders=orders,
@@ -86,21 +89,24 @@ async def password(message: types.Message, state: FSMContext):
                              '/addclient - добавление нового клиента \n'
                              '/addorder - добавляние нового заказа к клиенту \n'
                              '/clientinfo - поиск информации клиента и его заказов\n'
-                             '/findcloseorder - поиск ближайших заказов\n')
+                             '/findnearestorder - поиск ближайших заказов\n')
         await state.finish()
     else:
         await message.answer("Пароль неверный, попробуйте еще раз")
 
 
-@dp.message_handler(commands=['findcloseorder'])
-async def find_close_orders(message: types.Message):
+@dp.message_handler(commands=['findnearestorder'])
+async def find_nearest_orders(message: types.Message):
     if bot_db.editor_exists(message.from_user.id):
         close_orders = bot_db.get_close_orders()
-        for orders in close_orders:
-            inline_markup = get_keyboard(orders[1], orders[2], orders[3])
-            await message.answer(f'phone: {orders[1]}\n'
-                                 f'description: {orders[2]}\n'
-                                 f'deadline: {orders[3]}', reply_markup=inline_markup)
+        if close_orders:
+            for orders in close_orders:
+                inline_markup = get_keyboard(orders[1], orders[2], orders[3])
+                await message.answer(f'phone: {orders[1]}\n'
+                                     f'description: {orders[2]}\n'
+                                     f'deadline: {orders[3]}', reply_markup=inline_markup)
+        else:
+            await message.answer('У клинта еще не было заказов')
     else:
         await message.answer('У вас нет доступа')
 
@@ -131,9 +137,9 @@ async def process_callback_button1(callback_query: CallbackQuery, callback_data:
         message_id=callback_query.message.message_id,
         text=callback_query.message.text + '\n Заказ принят'
     )
-    phone = callback_data.get('phone')
-    orders = callback_data.get('orders')
-    deadline = callback_data.get('deadline').replace('/', ':')
+    phone = callback_data.get('phone').replace('\;/', ':')
+    orders = callback_data.get('orders').replace('\;/', ':')
+    deadline = callback_data.get('deadline').replace('\;/', ':')
 
     bot_db.from_activity_to_closed(phone, orders, deadline)
 
@@ -152,7 +158,7 @@ async def process_callback_button1(callback_query: CallbackQuery, callback_data:
         text=callback_query.message.text + '\n Заказ перенесен на 1 день'
     )
     phone = callback_data.get('phone')
-    deadline = callback_data.get('deadline').replace('/', ':')
+    deadline = callback_data.get('deadline').replace('\;/', ':')
 
     bot_db.update_deadline(phone, deadline)
 
@@ -190,7 +196,7 @@ async def add_order_to_client(message: types.Message, state: FSMContext):
 async def add_deadline_to_client(message: types.Message, state: FSMContext):
     await state.update_data(order=message.text)
     await message.answer("Теперь введите дедлайн заказа(если хотите оставить по умолчанию (неделя) введите 0)\n"
-                         "Формат ввода дедлайна: год-месяц-день (час:минута:секунда, это не обязательно)")
+                         "Формат ввода дедлайна: год-месяц-день час:минута:секунды (часы, мин, сек не обязательно)")
     await MSG_Order.next()
 
 
@@ -207,7 +213,8 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
             if deadline < datetime.today():
                 await message.answer('Дедлайн меньше текущего времени')
             else:
-                bot_db.add_order(data['phone'], data['order'], deadline.strftime("%Y-%m-%d %H:%M:%S"))
+                bot_db.add_order(data['phone'], data['order'],
+                                 deadline.strftime("%Y-%m-%d %H:%M:%S"))
                 await message.answer('Данные введены')
         else:
             await message.answer('Данные введены некорректно')
@@ -226,13 +233,16 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
 async def add_age_to_client(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
     data = await state.get_data()
-    if not bot_db.user_exists(data['phone']):
-        bot_db.add_user(data['username'], data['phone'])
-        await message.answer('Данные введены')
-        await message.answer(f"Имя: {data['username']}\n"
-                             f"Номер телефона: {data['phone']}")
+    if data['phone'][1:].isdigit():
+        if not bot_db.user_exists(data['phone']):
+            bot_db.add_user(data['username'], data['phone'])
+            await message.answer('Данные введены')
+            await message.answer(f"Имя: {data['username']}\n"
+                                 f"Номер телефона: {data['phone']}")
+        else:
+            await message.answer('Данный хуй уже присутсутвиет ясно нахуй!!!!(или номер телефона)')
     else:
-        await message.answer('Данный хуй уже присутсутвиет ясно нахуй!!!!(или номер телефона)')
+        await message.answer('Такой номер не может существовать')
     await state.finish()
 
 
@@ -250,8 +260,8 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
     data = await state.get_data()
     user = bot_db.find_user(data['phone'])
-    closed_orders = bot_db.users_closed_orders(user[2])
     if user:
+        closed_orders = bot_db.users_closed_orders(user[2])
         await message.answer(f"Имя: {user[1]}\n"
                              f"Номер телефона: {user[2]}\n"
                              f"Дата подключения: {user[3]}\n")
