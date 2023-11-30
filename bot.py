@@ -7,7 +7,7 @@ from keys import BOT_TOKEN
 from db import BotDB
 import datetime
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, proxy='http://proxy.server:3128')
 dp = Dispatcher(bot, storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
 bot_db = BotDB('users.db')
