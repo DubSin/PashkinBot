@@ -1,3 +1,5 @@
+import sqlite3
+
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import StatesGroup, State
 from aiogram.dispatcher import FSMContext
@@ -14,21 +16,13 @@ bot = Bot(token=BOT_TOKEN, proxy='http://proxy.server:3128')
 dp = Dispatcher(bot, storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
 bot_db = BotDB('users.db')
-order_data = CallbackData('base', 'action', 'phone', 'orders', 'deadline')
+order_data = CallbackData('base', 'action', 'id')
 
 
-def get_keyboard(phone, orders, deadline):
-    deadline = deadline.replace(':', '\;/')
-    phone = phone.replace(':', '\;/')
-    orders = orders.replace(':', '\;/')
-
+def get_keyboard(order_id):
     return InlineKeyboardMarkup().row(
-        InlineKeyboardButton('Принять', callback_data=order_data.new(action='accept', phone=phone,
-                                                                     orders=orders,
-                                                                     deadline=deadline)),
-        InlineKeyboardButton('Перенести', callback_data=order_data.new(action='post', phone=phone,
-                                                                       orders=orders,
-                                                                       deadline=deadline)))
+        InlineKeyboardButton('Принять', callback_data=order_data.new(action='accept', id=order_id)),
+        InlineKeyboardButton('Перенести', callback_data=order_data.new(action='post', id=order_id)))
 
 
 class MSG_Add(StatesGroup):
@@ -48,6 +42,12 @@ class MSG_Order(StatesGroup):
     phone = State()
     order = State()
     deadline = State()
+
+
+class MSG_Change_User(StatesGroup):
+    phone_find = State()
+    change_name = State()
+    change_phone = State()
 
 
 def converting_to_date(info):
@@ -89,6 +89,7 @@ async def password(message: types.Message, state: FSMContext):
                              '/addclient - добавление нового клиента \n'
                              '/addorder - добавляние нового заказа к клиенту \n'
                              '/clientinfo - поиск информации клиента и его заказов\n'
+                             '/changeclientinfo - изменить информацию о клиенте\n'
                              '/findnearestorder - поиск ближайших заказов\n')
         await state.finish()
     else:
@@ -101,12 +102,12 @@ async def find_nearest_orders(message: types.Message):
         close_orders = bot_db.get_close_orders()
         if close_orders:
             for orders in close_orders:
-                inline_markup = get_keyboard(orders[1], orders[2], orders[3])
+                inline_markup = get_keyboard(orders[0])
                 await message.answer(f'phone: {orders[1]}\n'
                                      f'description: {orders[2]}\n'
                                      f'deadline: {orders[3]}', reply_markup=inline_markup)
         else:
-            await message.answer('У клинта еще не было заказов')
+            await message.answer('Нет ближайщих заказов')
     else:
         await message.answer('У вас нет доступа')
 
@@ -117,7 +118,7 @@ async def notifications(time):
         for editor in editors:
             orders = bot_db.get_close_orders(one_time=True)
             if orders:
-                inline_markup = get_keyboard(orders[1], orders[2], orders[3])
+                inline_markup = get_keyboard(orders[0])
                 await bot.send_message(editor[0], f'phone: {orders[1]}\n'
                                                   f'description: {orders[2]}\n'
                                                   f'deadline: {orders[3]}', reply_markup=inline_markup)
@@ -132,16 +133,21 @@ async def process_callback_button1(callback_query: CallbackQuery, callback_data:
         chat_id=callback_query.from_user.id,
         message_id=callback_query.message.message_id,
         reply_markup=None)
-    await bot.edit_message_text(
-        chat_id=callback_query.from_user.id,
-        message_id=callback_query.message.message_id,
-        text=callback_query.message.text + '\n Заказ принят'
-    )
-    phone = callback_data.get('phone').replace('\;/', ':')
-    orders = callback_data.get('orders').replace('\;/', ':')
-    deadline = callback_data.get('deadline').replace('\;/', ':')
 
-    bot_db.from_activity_to_closed(phone, orders, deadline)
+    order_id = callback_data.get('id')
+    order = bot_db.get_order_by_id(order_id)
+    if order:
+        await bot.edit_message_text(
+            chat_id=callback_query.from_user.id,
+            message_id=callback_query.message.message_id,
+            text=callback_query.message.text + '\n Заказ принят'
+        )
+        bot_db.from_activity_to_closed(order[1], order[2], order[3])
+    else:
+        await bot.edit_message_text(
+            chat_id=callback_query.from_user.id,
+            message_id=callback_query.message.message_id,
+            text=callback_query.message.text + '\n Заказ уже принят')
 
 
 @dp.callback_query_handler(order_data.filter(action='post'))
@@ -155,12 +161,20 @@ async def process_callback_button1(callback_query: CallbackQuery, callback_data:
     await bot.edit_message_text(
         chat_id=callback_query.from_user.id,
         message_id=callback_query.message.message_id,
-        text=callback_query.message.text + '\n Заказ перенесен на 1 день'
-    )
-    phone = callback_data.get('phone')
-    deadline = callback_data.get('deadline').replace('\;/', ':')
-
-    bot_db.update_deadline(phone, deadline)
+        text=callback_query.message.text + '\n Заказ перенесен на 1 день')
+    order_id = callback_data.get('id')
+    order = bot_db.get_order_by_id(order_id)
+    if order:
+        await bot.edit_message_text(
+            chat_id=callback_query.from_user.id,
+            message_id=callback_query.message.message_id,
+            text=callback_query.message.text + '\n Заказ перенесен на 1 день')
+        bot_db.update_deadline(order[1], order[3])
+    else:
+        await bot.edit_message_text(
+            chat_id=callback_query.from_user.id,
+            message_id=callback_query.message.message_id,
+            text=callback_query.message.text + '\n Заказ уже перенесен на 1 день')
 
 
 @dp.message_handler(commands=['addclient'])
@@ -170,6 +184,28 @@ async def add_client(message: types.Message):
         await MSG_Add.name.set()
     else:
         await message.answer('У вас нет доступа')
+
+
+@dp.message_handler(state=MSG_Add.name)
+async def add_name_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(username=message.text)
+    await message.answer("Отлично! Теперь введите его номер телефона:")
+    await MSG_Add.next()
+
+
+@dp.message_handler(state=MSG_Add.phone)
+async def add_age_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(phone=message.text)
+    data = await state.get_data()
+    if not bot_db.user_exists(data['phone']):
+        bot_db.add_user(data['username'], data['phone'])
+        await message.answer('Данные введены')
+        await message.answer(f"Имя: {data['username']}\n"
+                             f"Номер телефона: {data['phone']}")
+    else:
+        await message.answer('Данный хуй уже присутсутвиет ясно нахуй!!!!(или номер телефона)')
+
+    await state.finish()
 
 
 @dp.message_handler(commands=['addorder'])
@@ -222,30 +258,6 @@ async def add_name_to_client(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-@dp.message_handler(state=MSG_Add.name)
-async def add_name_to_client(message: types.Message, state: FSMContext):
-    await state.update_data(username=message.text)
-    await message.answer("Отлично! Теперь введите его номер телефона:")
-    await MSG_Add.next()
-
-
-@dp.message_handler(state=MSG_Add.phone)
-async def add_age_to_client(message: types.Message, state: FSMContext):
-    await state.update_data(phone=message.text)
-    data = await state.get_data()
-    if data['phone'][1:].isdigit():
-        if not bot_db.user_exists(data['phone']):
-            bot_db.add_user(data['username'], data['phone'])
-            await message.answer('Данные введены')
-            await message.answer(f"Имя: {data['username']}\n"
-                                 f"Номер телефона: {data['phone']}")
-        else:
-            await message.answer('Данный хуй уже присутсутвиет ясно нахуй!!!!(или номер телефона)')
-    else:
-        await message.answer('Такой номер не может существовать')
-    await state.finish()
-
-
 @dp.message_handler(commands=['clientinfo'])
 async def find_client(message: types.Message):
     if bot_db.editor_exists(message.from_user.id):
@@ -262,19 +274,79 @@ async def find_user_by_phone(message: types.Message, state: FSMContext):
     user = bot_db.find_user(data['phone'])
     if user:
         closed_orders = bot_db.users_closed_orders(user[2])
+        active_orders = bot_db.users_active_orders(user[2])
         await message.answer(f"Имя: {user[1]}\n"
                              f"Номер телефона: {user[2]}\n"
                              f"Дата подключения: {user[3]}\n")
-        for order in closed_orders:
-            await message.answer(f"Номер телефон: {order[1]}\n"
-                                 f"Заказ: {order[2]}\n"
-                                 f"Дата закрытия заказ{order[3]}")
+        if active_orders:
+            await message.answer('Текущие заказы:')
+            for order in active_orders:
+                inline_markup = get_keyboard(order[0])
+                await message.answer(f"Номер телефон: {order[1]}\n"
+                                     f"Заказ: {order[2]}\n"
+                                     f"Дедлайн заказа: {order[3]}", reply_markup=inline_markup)
+        if closed_orders:
+            await message.answer('Закрытые заказы:')
+            for order in closed_orders:
+                await message.answer(f"Номер телефон: {order[1]}\n"
+                                     f"Заказ: {order[2]}\n"
+                                     f"Дата закрытия заказа: {order[3]}")
     else:
         await message.answer('Клиент не найден нахуй!!!!!!!')
     await state.finish()
 
 
+@dp.message_handler(commands=['changeclientinfo'])
+async def find_client(message: types.Message):
+    if bot_db.editor_exists(message.from_user.id):
+        await message.answer('Номер телефона клиента: ')
+        await MSG_Change_User.phone_find.set()
+    else:
+        await message.answer('У вас нет доступа')
+
+
+@dp.message_handler(state=MSG_Change_User.phone_find)
+async def add_name_to_client(message: types.Message, state: FSMContext):
+    user = bot_db.find_user(message.text)
+    if user:
+        await state.update_data(phone_find=message.text)
+        await message.answer("Отлично! Теперь изменим имя(если хотите оставить без изменений введите 0):")
+        await MSG_Change_User.next()
+    else:
+        await message.answer('Такого пользоователя не существует')
+        await state.finish()
+
+
+@dp.message_handler(state=MSG_Change_User.change_name)
+async def add_name_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(change_name=message.text)
+    await message.answer("Отлично! Теперь изменим номер телефона(если хотите оставить без изменений введите 0):")
+    await MSG_Change_User.next()
+
+
+@dp.message_handler(state=MSG_Change_User.change_phone)
+async def add_age_to_client(message: types.Message, state: FSMContext):
+    await state.update_data(change_phone=message.text)
+    data = await state.get_data()
+    try:
+        bot_db.change_user_info(data['phone_find'], data['change_name'], data['change_phone'])
+        if data['change_phone'] == '0':
+            new_dt = bot_db.find_user(data['phone_find'])
+        if data['change_phone'] != '0':
+            new_dt = bot_db.find_user(data['change_phone'])
+        if data['change_name'] == '0' and data['change_phone'] == '0':
+            await message.answer('Ничего не было изменено')
+        else:
+            await message.answer('Данные изменены')
+            await message.answer(f"Имя: {new_dt[1]}\n"
+                                 f"Номер телефона: {new_dt[2]}")
+    except sqlite3.IntegrityError as e:
+        print(e)
+        await message.answer('Данный номер уже используется')
+    await state.finish()
+
+
 if '__main__' == __name__:
     loop = asyncio.get_event_loop()
-    loop.create_task(notifications(10800))
+    loop.create_task(notifications(10))
     executor.start_polling(dp, skip_updates=True)

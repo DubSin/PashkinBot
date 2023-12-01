@@ -8,15 +8,32 @@ class BotDB:
         self.cursor = self.db.cursor()
 
     def add_editor(self, editor_id):
-        self.cursor.execute("INSERT INTO 'editors' ('editor_id') VALUES (?)", (editor_id, ))
+        self.cursor.execute("INSERT INTO 'editors' ('editor_id') VALUES (?)", (editor_id,))
         return self.db.commit()
 
     def editor_exists(self, editor_id):
         result = self.cursor.execute("SELECT `id` FROM `editors` WHERE `editor_id` = ?", (editor_id,))
         return bool(len(result.fetchall()))
 
+    def get_order_by_id(self, order_id):
+        result = self.cursor.execute("SELECT * FROM `activity_orders` WHERE `id` = ?", (order_id,))
+        return result.fetchone()
+
+    def change_user_info(self, phone_find, new_user, new_phone):
+        if new_user == '0':
+            self.cursor.execute("UPDATE `users` SET `phone` = ? WHERE `phone` = ?", (new_phone, phone_find))
+        elif new_phone == '0':
+            self.cursor.execute("UPDATE `users` SET `name` = ? WHERE `phone` = ?", (new_user, phone_find))
+        else:
+            self.cursor.execute("UPDATE `users` SET `name` = ? WHERE `phone` = ?",
+                                (new_user, phone_find))
+            self.cursor.execute("UPDATE `users` SET `phone` = ? WHERE `phone` = ?",
+                                (new_phone, phone_find))
+
+        return self.db.commit()
+
     def get_close_orders(self, one_time=False):
-        orders = self.cursor.execute("SELECT * FROM 'activity_orders'").fetchall()
+        orders = self.cursor.execute("SELECT * FROM `activity_orders`").fetchall()
         now = datetime.today()
         result = []
         way = []
@@ -30,14 +47,13 @@ class BotDB:
                     pass
             if one_time and way:
                 result = min(way, key=lambda x: x[4])
-            return result
+        return result
 
     def get_editors(self):
         result = self.cursor.execute("SELECT `editor_id` from `editors`")
         return result.fetchall()
 
     def from_activity_to_closed(self, phone, orders, deadline):
-        print(deadline)
         self.cursor.execute("INSERT INTO `closed_orders` (`phone`, `orders`) VALUES (?, ?)", (phone, orders))
         self.cursor.execute("DELETE FROM `activity_orders` WHERE `phone` = ? AND `orders` = ? AND `deadline` = ?",
                             (phone, orders, deadline))
@@ -58,11 +74,15 @@ class BotDB:
         return bool(len(result.fetchall()))
 
     def find_user(self, phone):
-        result = self.cursor.execute("SELECT * FROM `users` WHERE `phone` = ?", (phone, ))
+        result = self.cursor.execute("SELECT * FROM `users` WHERE `phone` = ?", (phone,))
         return result.fetchone()
 
     def users_closed_orders(self, phone):
-        result = self.cursor.execute("SELECT * FROM `closed_orders` WHERE `phone` = ?", (phone, ))
+        result = self.cursor.execute("SELECT * FROM `closed_orders` WHERE `phone` = ?", (phone,))
+        return result.fetchall()
+
+    def users_active_orders(self, phone):
+        result = self.cursor.execute("SELECT * FROM `activity_orders` WHERE `phone` = ?", (phone,))
         return result.fetchall()
 
     def add_order(self, phone, order, deadline=False):
@@ -72,4 +92,3 @@ class BotDB:
         else:
             self.cursor.execute("INSERT INTO 'activity_orders' ('phone', 'orders') VALUES (?, ?)", (phone, order))
         return self.db.commit()
-
